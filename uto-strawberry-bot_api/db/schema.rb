@@ -10,5 +10,30 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 0) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_23_154154) do
+  create_table "kingdoms", force: :cascade do |t|
+    t.string "loc"
+    t.string "name"
+    t.string "stance"
+    t.integer "honor"
+    t.integer "nw"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "provinces", force: :cascade do |t|
+    t.integer "kingdom_id", null: false
+    t.string "loc"
+    t.string "name"
+    t.integer "land"
+    t.string "race"
+    t.integer "honor"
+    t.integer "nw"
+    t.boolean "protected"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["kingdom_id"], name: "index_provinces_on_kingdom_id"
+  end
+
+  add_foreign_key "provinces", "kingdoms"
 end
