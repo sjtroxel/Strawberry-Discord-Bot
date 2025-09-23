@@ -25,9 +25,10 @@ gem "discord-notifier"
 
 # Background jobs
 gem "sidekiq"
+gem "sidekiq-scheduler"
 
 # Optional: scheduling background tasks
-gem "whenever", require: false
+# gem "whenever", require: false
 
 group :development, :test do
   gem "pry"          # debugging

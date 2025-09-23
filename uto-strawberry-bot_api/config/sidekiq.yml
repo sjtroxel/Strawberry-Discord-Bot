@@ -1,0 +1,9 @@
+:concurrency: 5
+:queues:
+  - default
+
+:schedule:
+  utopia_sync_job:       # descriptive name for the schedule
+    cron: "*/10 * * * *" # every 10 minutes
+    class: "UtopiaSyncJob"
+    queue: default
