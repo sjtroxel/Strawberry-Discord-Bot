@@ -134,4 +134,100 @@ class WarEowcfDetector
     return nil unless tokens[0].downcase == "war"
     tokens[1]
   end
+
+  # -------------------------------------------------------------
+  # New helper method: detect end-of-war changes for a single kingdom
+  # Usage: WarEowcfDetector.check_kingdom("8:2")
+  # -------------------------------------------------------------
+  # Run detection for a single kingdom (by loc)
+# Returns array of created EowcfRecord (might be empty)
+def self.check_kingdom(loc, snapshot_time = Time.current)
+  t = snapshot_time.is_a?(String) ? Time.parse(snapshot_time) : snapshot_time.to_time
+  created = []
+
+  kingdom = Kingdom.find_by(loc: loc)
+  unless kingdom
+    Rails.logger.info("[WarEowcfDetector] No kingdom found at loc #{loc}")
+    return created
+  end
+
+  # Only check kingdoms currently at war
+  unless kingdom.stance.to_s.downcase.include?("war")
+    Rails.logger.info("[WarEowcfDetector] Kingdom #{kingdom.name} (#{loc}) not at war, skipping.")
+    return created
+  end
+
+  opponent_loc = parse_opponent_loc(kingdom.stance)
+  if opponent_loc.blank?
+    Rails.logger.info("[WarEowcfDetector] Kingdom #{kingdom.name} (#{loc}) stance does not include opponent loc, skipping.")
+    return created
+  end
+
+  opponent = Kingdom.find_by(loc: opponent_loc)
+  unless opponent
+    Rails.logger.info("[WarEowcfDetector] Opponent kingdom not found at loc #{opponent_loc}, skipping.")
+    return created
+  end
+
+  # Load last two snapshots for both kingdoms
+  snaps = KingdomSnapshot.where(loc: kingdom.loc).order(snapshot_time: :desc).limit(2)
+  opp_snaps = KingdomSnapshot.where(loc: opponent.loc).order(snapshot_time: :desc).limit(2)
+
+  if snaps.size < 2 || opp_snaps.size < 2
+    Rails.logger.info("[WarEowcfDetector] Not enough snapshots to compare for #{loc} or #{opponent_loc}, skipping.")
+    return created
+  end
+
+  current_snap, prev_snap = snaps.first, snaps.second
+  current_snap_op, prev_snap_op = opp_snaps.first, opp_snaps.second
+
+  change = percent_change(prev_snap.total_land, current_snap.total_land)
+  opp_change = percent_change(prev_snap_op.total_land, current_snap_op.total_land)
+  honor_change = percent_change(prev_snap.total_honor, current_snap.total_honor)
+  opp_honor_change = percent_change(prev_snap_op.total_honor, current_snap_op.total_honor)
+
+  # DEBUG logging
+  Rails.logger.info("[DEBUG] Kingdom #{kingdom.name} (#{loc}) land change: #{change.round(4)}, honor change: #{honor_change.round(4)}")
+  Rails.logger.info("[DEBUG] Opponent #{opponent.name} (#{opponent.loc}) land change: #{opp_change.round(4)}, honor change: #{opp_honor_change.round(4)}")
+
+  winner = nil
+  loser = nil
+
+  if change >= LAND_CHANGE_THRESHOLD && opp_change <= -LAND_CHANGE_THRESHOLD
+    winner = kingdom
+    loser = opponent
+  elsif opp_change >= LAND_CHANGE_THRESHOLD && change <= -LAND_CHANGE_THRESHOLD
+    winner = opponent
+    loser = kingdom
+  end
+
+  if winner && loser
+    eowcf_start = t.utc.beginning_of_hour
+    eowcf_end   = eowcf_start + 96.hours
+
+    existing = EowcfRecord.where(kingdom: [winner, loser]).where("eowcf_end > ?", eowcf_start).exists?
+    return created if existing
+
+    [winner, loser].each do |k|
+      rec = EowcfRecord.create!(
+        kingdom: k,
+        loc: k.loc,
+        eowcf_start: eowcf_start,
+        eowcf_end: eowcf_end,
+        detected_at: t.utc,
+        reason: "Detected via land/honor reallocation (automatic)"
+      )
+      created << rec
+    end
+
+    begin
+      DiscordNotifier.send_message("🍓 Strawberry: Detected end of active war between #{winner.name} (#{winner.loc}) and #{loser.name} (#{loser.loc}). EoWCF started at #{eowcf_start.utc} and ends at #{eowcf_end.utc} (96 ticks).")
+    rescue => e
+      Rails.logger.error("[WarEowcfDetector] Failed to send Discord notification: #{e.message}")
+    end
+  end
+
+  Rails.logger.info("[WarEowcfDetector] check_kingdom(#{loc}) created #{created.size} EoWCF records.")
+  created
+end
 end
